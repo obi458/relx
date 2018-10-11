@@ -10,6 +10,7 @@
 :: * ping - check if the node is running
 :: * console - start the Erlang release in a `werl` Windows shell
 :: * attach - connect to a running node and open an interactive console
+:: * remote_console - alias for attach
 :: * list - display a listing of installed Erlang services
 :: * usage - display available commands
 
@@ -25,7 +26,7 @@
 @for %%A in ("%script_dir%\..") do @(
   set release_root_dir=%%~fA
 )
-@set rel_dir=%release_root_dir%\releases\%rel_vsn%
+@set "rel_dir=%release_root_dir%\releases\%rel_vsn%"
 
 @call :find_erts_dir
 @call :find_sys_config
@@ -48,6 +49,30 @@
   set node_name=%%J
 )
 
+@for /f "delims=@ tokens=1-2" %%I in ("%node_name%") do @(
+    set node_name=%%I
+    set hostname=%%J
+)
+
+:: if no hostname is set, attempt to pick one from the env
+@if "" == "%hostname%" @(
+    if "-sname" == "%node_type%" (
+        if not "" == "%COMPUTERNAME%" (
+            set "hostname=%COMPUTERNAME%"
+        )
+    ) else (
+        if not "" == "%COMPUTERNAME%" (
+            if not "" == "%USERDNSDOMAIN%" (
+                set "hostname=%COMPUTERNAME%.%USERDNSDOMAIN%"
+            )
+        )
+    )
+)
+:: Add @ to hostname if not empty so that we can just concatenate values safely
+@if not "" == "%hostname%" @(
+    set "hostname=@%hostname%"
+)
+
 :: Extract cookie from vm.args
 @for /f "usebackq tokens=1-2" %%I in (`findstr /b \-setcookie "%vm_args%"`) do @(
   set cookie=%%J
@@ -55,6 +80,19 @@
 
 :: Write the erl.ini file to set up paths relative to this script
 @call :write_ini
+
+:: Collect any additional VM args into erl_opts
+@setlocal EnableDelayedExpansion
+@for /f "usebackq tokens=1-2" %%I in (`findstr /r "^[^#]" "%vm_args%"`) do @(
+  if not "%%I" == "-name" (
+    if not "%%I" == "-sname" (
+      if not "%%I" == "-setcookie" (
+        set erl_opts=!erl_opts! %%I %%J
+      )
+    )
+  )
+)
+@endlocal && set erl_opts=%erl_opts%
 
 :: If a start.boot file is not present, copy one from the named .boot file
 @if not exist "%rel_dir%\start.boot" (
@@ -72,6 +110,7 @@
 @if "%1"=="ping" @goto ping
 @if "%1"=="list" @goto list
 @if "%1"=="attach" @goto attach
+@if "%1"=="remote_console" @goto attach
 @if "%1"=="" @goto usage
 @echo Unknown command: "%1"
 
@@ -79,7 +118,7 @@
 
 :: Find the ERTS dir
 :find_erts_dir
-@set possible_erts_dir=%release_root_dir%\erts-%erts_vsn%
+@set "possible_erts_dir=%release_root_dir%\erts-%erts_vsn%"
 @if exist "%possible_erts_dir%" (
   call :set_erts_dir_from_default
 ) else (
@@ -89,8 +128,8 @@
 
 :: Set the ERTS dir from the passed in erts_vsn
 :set_erts_dir_from_default
-@set erts_dir=%possible_erts_dir%
-@set rootdir=%release_root_dir%
+@set "erts_dir=%possible_erts_dir%"
+@set "rootdir=%release_root_dir%"
 @goto :eof
 
 :: Set the ERTS dir from erl
@@ -98,17 +137,17 @@
 @for /f "delims=" %%i in ('where erl') do @(
   set erl=%%i
 )
-@set dir_cmd="%erl%" -noshell -eval "io:format(\"~s\", [filename:nativename(code:root_dir())])." -s init stop
+@set dir_cmd="%erl%" -boot no_dot_erlang -noshell -eval "io:format(\"~s\", [filename:nativename(code:root_dir())])." -s init stop
 @for /f "delims=" %%i in ('%%dir_cmd%%') do @(
   set erl_root=%%i
 )
-@set erts_dir=%erl_root%\erts-%erts_vsn%
-@set rootdir=%erl_root%
+@set "erts_dir=%erl_root%\erts-%erts_vsn%"
+@set "rootdir=%erl_root%"
 @goto :eof
 
 :: Find the sys.config file
 :find_sys_config
-@set possible_sys=%rel_dir%\sys.config
+@set "possible_sys=%rel_dir%\sys.config"
 @if exist %possible_sys% (
   set sys_config=-config "%possible_sys%"
 )
@@ -117,9 +156,9 @@
 :: set boot_script variable
 :set_boot_script_var
 @if exist "%rel_dir%\%rel_name%.boot" (
-  set boot_script=%rel_dir%\%rel_name%
+  set "boot_script=%rel_dir%\%rel_name%"
 ) else (
-  set boot_script=%rel_dir%\start
+  set "boot_script=%rel_dir%\start"
 )
 @goto :eof
 
@@ -136,7 +175,7 @@
 
 :: Display usage information
 :usage
-@echo usage: %~n0 ^(install^|uninstall^|start^|stop^|restart^|upgrade^|downgrade^|console^|ping^|list^|attach^)
+@echo usage: %~n0 ^(install^|uninstall^|start^|stop^|restart^|upgrade^|downgrade^|console^|ping^|list^|attach^|remote_console^)
 @goto :eof
 
 :: Install the release as a Windows service
@@ -144,12 +183,10 @@
 :install
 set args=%erl_opts% -setcookie %cookie% ++ -rootdir \"%rootdir%\"
 set start_erl=%erts_dir%\bin\start_erl.exe
-set description=Erlang node %node_name% in %rootdir%
+set description=Erlang node %node_name%%hostname% in %rootdir%
 @if "" == "%2" (
   :: Install the service
-  %erlsrv% add %service_name% %node_type% "%node_name%" -c "%description%" ^
-            -w "%rootdir%" -m "%start_erl%" -args "%args%" ^
-            -stopaction "init:stop()."
+  %erlsrv% add %service_name% %node_type% "%node_name%%hostname%" -c "%description%" -w "%rootdir%" -m "%start_erl%" -args "%args%" -stopaction "init:stop()."
 ) else (
   :: relup and reldown
   goto relup
@@ -175,13 +212,12 @@ set description=Erlang node %node_name% in %rootdir%
 :: Relup and reldown
 :relup
 @if "" == "%2" (
-  echo Missing package argument
-  echo Usage: %rel_name% %1 {package base name}
-  echo NOTE {package base name} MUST NOT include the .tar.gz suffix
+  echo Missing version argument
+  echo Usage: %rel_name% %1 {version}
   set ERRORLEVEL=1
   exit /b %ERRORLEVEL%
 )
-@%escript% "%rootdir%/bin/install_upgrade.escript" "%rel_name%" "%node_name%" "%cookie%" "%2"
+@%escript% "%rootdir%/bin/install_upgrade.escript" "install" "{'%rel_name%', \"%node_type%\", '%node_name%%hostname%', '%cookie%'}" "%2" "%3"
 @goto :eof
 
 :: Start a console
@@ -193,7 +229,7 @@ set description=Erlang node %node_name% in %rootdir%
 
 :: Ping the running node
 :ping
-@%escript% %nodetool% ping %node_type% "%node_name%" -setcookie "%cookie%"
+@%escript% %nodetool% ping %node_type% "%node_name%%hostname%" -setcookie "%cookie%"
 @goto :eof
 
 :: List installed Erlang services
@@ -205,5 +241,5 @@ set description=Erlang node %node_name% in %rootdir%
 :attach
 @set boot=-boot "%clean_boot_script%" -boot_var RELEASE_DIR "%release_root_dir%"
 @start "%node_name% attach" %werl% %boot% ^
-       -remsh %node_name% %node_type% console -setcookie %cookie%
+       -remsh %node_name%%hostname% %node_type% console -setcookie %cookie%
 @goto :eof

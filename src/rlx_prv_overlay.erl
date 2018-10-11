@@ -145,7 +145,8 @@ get_overlay_vars_from_file(State, OverlayVars) ->
             OverlayVars;
         [] ->
             OverlayVars;
-        [H | _]=FileNames when is_list(H) ->
+        [H | _]=FileNames when is_list(H) ;
+                               is_tuple(H) ->
             read_overlay_vars(State, OverlayVars, FileNames);
         FileName when is_list(FileName) ->
             read_overlay_vars(State, OverlayVars, [FileName])
@@ -181,30 +182,24 @@ check_overlay_inclusion(_State, _RelativeRoot, [], Terms) ->
                                 proplists:proplist().
 merge_overlay_vars(State, FileNames) ->
     RelativeRoot = get_relative_root(State),
-    lists:foldl(fun(FileName, Acc) ->
-                        RelativePath = filename:join(RelativeRoot, erlang:iolist_to_binary(FileName)),
+    lists:foldl(fun(FileName, Acc) when is_list(FileName) ->
+                        RelativePath = filename:join(RelativeRoot, iolist_to_binary(FileName)),
                         case file:consult(RelativePath) of
-                            %% {ok, [Terms]} ->
-                            %%     lists:ukeymerge(1, lists:ukeysort(1, Terms), Acc);
-                            %%     % the location of the included overlay files will be relative
-                            %%     %% to the current one being read
-                            %%     %% OverlayRelativeRoot = filename:dirname(FileName),
-                            %%     %% NewTerms = check_overlay_inclusion(State, OverlayRelativeRoot, Terms),
-
-                            %%     %% lists:ukeymerge(1, lists:ukeysort(1, NewTerms), Acc);
                             {ok, Terms} ->
                                 %% the location of the included overlay files will be relative
                                 %% to the current one being read
                                 OverlayRelativeRoot = filename:dirname(FileName),
                                 NewTerms = check_overlay_inclusion(State, OverlayRelativeRoot, Terms),
                                 lists:foldl(fun(NewTerm, A) ->
-                                                lists:keystore(element(1, NewTerm), 1, A, NewTerm)
+                                                    lists:keystore(element(1, NewTerm), 1, A, NewTerm)
                                             end, Acc, NewTerms);
                             {error, Reason} ->
                                 ec_cmd_log:warn(rlx_state:log(State),
                                                 format_error({unable_to_read_varsfile, FileName, Reason})),
                                 Acc
-                        end
+                        end;
+                   (Var, Acc) ->
+                        lists:keystore(element(1, Var), 1, Acc, Var)
                 end, [], FileNames).
 
 -spec render_overlay_vars(proplists:proplist(), proplists:proplist(),
@@ -245,6 +240,7 @@ render_overlay_vars(_OverlayVars, [], Acc) ->
 -spec generate_release_vars(rlx_release:t()) -> proplists:proplist().
 generate_release_vars(Release) ->
     [{erts_vsn, rlx_release:erts(Release)},
+     {erts_dir, code:root_dir()},
      {release_erts_version, rlx_release:erts(Release)},
      {release_name, rlx_release:name(Release)},
      {rel_vsn, rlx_release:vsn(Release)},
@@ -308,6 +304,28 @@ handle_errors(State, Result) ->
 -spec do_individual_overlay(rlx_state:t(), list(), proplists:proplist(),
                             OverlayDirective::term()) ->
                                    {ok, rlx_state:t()} | relx:error().
+do_individual_overlay(State, _Files, OverlayVars, {chmod, Mode, Path}) ->
+    % mode can be specified directly as an integer value, or if it is
+    % not an integer we assume it's a template, which we render and convert
+    % blindly to an integer.  So this will crash with an exception if for
+    % some reason something other than an integer is used
+    NewMode =
+        case is_integer(Mode) of
+            true -> Mode;
+            false -> erlang:list_to_integer(erlang:binary_to_list(render_string (OverlayVars, Mode)))
+        end,
+
+    Root = rlx_state:output_dir(State),
+    file_render_do(OverlayVars, Path,
+                   fun(NewPath) ->
+                            Absolute = absolutize(State,
+                                                  filename:join(Root,erlang:iolist_to_binary (NewPath))),
+                            case file:change_mode(Absolute, NewMode) of
+                                {error, Error} ->
+                                    ?RLX_ERROR({unable_to_chmod, NewMode, NewPath, Error});
+                                ok -> ok
+                            end
+                   end);
 do_individual_overlay(State, _Files, OverlayVars, {mkdir, Dir}) ->
     case rlx_util:render(erlang:iolist_to_binary(Dir), OverlayVars) of
         {ok, IoList} ->
@@ -379,10 +397,8 @@ copy_to(State, FromFile0, ToFile0) ->
                       erlang:iolist_to_binary(filename:join(ToFile1,
                                                             filename:basename(FromFile1)))
               end,
-    case ec_file:copy(FromFile1, ToFile2, [recursive]) of
+    case ec_file:copy(FromFile1, ToFile2, [recursive, {file_info, [mode, time]}]) of
         ok ->
-            {ok, FileInfo} = file:read_file_info(FromFile1),
-            ok = file:write_file_info(ToFile2, FileInfo),
             ok;
         {error, Err} ->
             ?RLX_ERROR({copy_failed,
@@ -461,10 +477,17 @@ write_template(OverlayVars, FromFile, ToFile) ->
                 {ok, IoData} ->
                     case filelib:ensure_dir(ToFile) of
                         ok ->
+                            %% we were asked to render a template
+                            %% onto a symlink, this would cause an overwrite
+                            %% of the original file, so we delete the symlink
+                            %% and go ahead with the template render
+                            case ec_file:is_symlink(ToFile) of
+                                true -> ec_file:remove(ToFile);
+                                false -> ok
+                            end,
                             case file:write_file(ToFile, IoData) of
                                 ok ->
-                                    {ok, FileInfo} = file:read_file_info(FromFile),
-                                    ok = file:write_file_info(ToFile, FileInfo),
+                                    ok = ec_file:copy_file_info(ToFile, FromFile, [mode, time]),
                                     ok;
                                 {error, Reason} ->
                                     ?RLX_ERROR({unable_to_write, ToFile, Reason})

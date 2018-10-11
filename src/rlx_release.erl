@@ -39,6 +39,7 @@
          realized/1,
          metadata/1,
          start_clean_metadata/1,
+         no_dot_erlang_metadata/1,
          canonical_name/1,
          config/1,
          config/2,
@@ -59,7 +60,7 @@
 
 -record(release_t, {name :: atom(),
                     vsn :: ec_semver:any_version(),
-                    erts :: ec_semver:any_version(),
+                    erts :: undefined | ec_semver:any_version(),
                     goals = [] :: [rlx_depsolver:constraint()],
                     realized = false :: boolean(),
                     annotations = undefined :: annotations(),
@@ -144,7 +145,12 @@ goals(#release_t{goals=Goals}) ->
                      {ok, t()}.
 realize(Rel, Pkgs0, World0) ->
     World1 = subset_world(Pkgs0, World0),
-    process_specs(realize_erts(Rel), World1).
+    case rlx_topo:sort_apps(World1) of
+        {ok, Pkgs1} ->
+            process_specs(realize_erts(Rel), Pkgs1);
+        Error={error, _} ->
+            Error
+    end.
 
 %% @doc this gives the application specs for the release. This can only be
 %% populated by the 'realize' call in this module.
@@ -193,6 +199,12 @@ start_clean_metadata(#release_t{name=Name, vsn=Vsn, erts=ErtsVsn, applications=A
             ?RLX_ERROR({not_realized, Name, Vsn})
     end.
 
+%% The no_dot_erlang.rel.src file is a literal copy of start_clean.rel.src
+%% in Erlang/OTP itself.
+-spec no_dot_erlang_metadata(t()) -> term().
+no_dot_erlang_metadata(T) ->
+    start_clean_metadata(T).
+
 %% @doc produce the canonical name (<name>-<vsn>) for this release
 -spec canonical_name(t()) -> string().
 canonical_name(#release_t{name=Name, vsn=Vsn}) ->
@@ -239,6 +251,8 @@ format_goal(Constraint) ->
     rlx_depsolver:format_constraint(Constraint).
 
 -spec format_error(Reason::term()) -> iolist().
+format_error({topo_error, E}) ->
+    rlx_topo:format_error(E);
 format_error({failed_to_parse, Con}) ->
     io_lib:format("Failed to parse constraint ~p", [Con]);
 format_error({invalid_constraint, _, Con}) ->
@@ -370,7 +384,7 @@ parse_goal1(Release = #release_t{annotations=Annots,  goals=Goals},
         AppName ->
             {ok,
              Release#release_t{annotations=ec_dictionary:add(AppName, NewAnnots, Annots),
-                               goals = [Constraint | Goals]}}
+                               goals = Goals++[Constraint]}}
     end.
 
 -spec parse_constraint(application_constraint()) ->

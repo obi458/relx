@@ -54,8 +54,12 @@
          hooks/2,
          vm_args/1,
          vm_args/2,
+         vm_args_src/1,
+         vm_args_src/2,
          sys_config/1,
          sys_config/2,
+         sys_config_src/1,
+         sys_config_src/2,
          root_dir/1,
          root_dir/2,
          add_configured_release/2,
@@ -82,8 +86,11 @@
          upfrom/1,
          upfrom/2,
          format/1,
-         format/2]).
-
+         format/2,
+         exclude_modules/1,
+         exclude_modules/2,
+         warnings_as_errors/1,
+         warnings_as_errors/2]).
 
 -export_type([t/0,
              releases/0,
@@ -103,10 +110,13 @@
                   available_apps=[] :: [rlx_app_info:t()],
                   default_configured_release :: {rlx_release:name() | undefined, rlx_release:vsn() |undefined} | undefined,
                   vm_args :: file:filename() | false | undefined,
+                  vm_args_src :: file:filename() | undefined,
                   sys_config :: file:filename() | false | undefined,
+                  sys_config_src :: file:filename() | undefined,
                   overrides=[] :: [{AppName::atom(), Directory::file:filename()}],
                   skip_apps=[] :: [AppName::atom()],
                   exclude_apps=[] :: [AppName::atom()],
+                  exclude_modules=[] :: [{App::atom(), [Module::atom()]}],
                   debug_info=keep :: keep | strip,
                   configured_releases :: releases(),
                   realized_releases :: releases(),
@@ -114,7 +124,8 @@
                   include_src=true :: boolean(),
                   upfrom :: string() | binary() | undefined,
                   config_values :: ec_dictionary:dictionary(Key::atom(),
-                                                            Value::term())}).
+                                                            Value::term()),
+                  warnings_as_errors=false :: boolean()}).
 
 %%============================================================================
 %% types
@@ -200,6 +211,15 @@ exclude_apps(#state_t{exclude_apps=Apps}) ->
 exclude_apps(State, SkipApps) ->
     State#state_t{exclude_apps=SkipApps}.
 
+-spec exclude_modules(t()) -> [{App::atom(), [Module::atom()]}].
+exclude_modules(#state_t{exclude_modules=Modules}) ->
+    Modules.
+
+%% @doc modules to be excluded from the release 
+-spec exclude_modules(t(), [{App::atom(), [Module::atom()]}]) -> t().
+exclude_modules(State, SkipModules) ->
+    State#state_t{exclude_modules=SkipModules}.
+
 -spec debug_info(t()) -> keep | strip.
 debug_info(#state_t{debug_info=DebugInfo}) ->
     DebugInfo.
@@ -270,6 +290,14 @@ vm_args(#state_t{vm_args=VmArgs}) ->
 vm_args(State, VmArgs) ->
     State#state_t{vm_args=VmArgs}.
 
+-spec vm_args_src(t()) -> file:filename() | undefined.
+vm_args_src(#state_t{vm_args_src=VmArgs}) ->
+    VmArgs.
+
+-spec vm_args_src(t(), undefined | file:filename()) -> t().
+vm_args_src(State, VmArgs) ->
+    State#state_t{vm_args_src=VmArgs}.
+
 -spec sys_config(t()) -> file:filename() | false | undefined.
 sys_config(#state_t{sys_config=SysConfig}) ->
     SysConfig.
@@ -277,6 +305,14 @@ sys_config(#state_t{sys_config=SysConfig}) ->
 -spec sys_config(t(), false | file:filename()) -> t().
 sys_config(State, SysConfig) ->
     State#state_t{sys_config=SysConfig}.
+
+-spec sys_config_src(t()) -> file:filename() | undefined.
+sys_config_src(#state_t{sys_config_src=SysConfigSrc}) ->
+    SysConfigSrc.
+
+-spec sys_config_src(t(), file:filename() | undefined) -> t().
+sys_config_src(State, SysConfigSrc) ->
+    State#state_t{sys_config_src=SysConfigSrc}.
 
 -spec root_dir(t()) -> file:filename() | undefined.
 root_dir(#state_t{root_dir=RootDir}) ->
@@ -441,6 +477,14 @@ append_hook(State=#state_t{providers=_Providers}, Target, Hook) ->
 hooks(_State=#state_t{providers=Providers}, Target) ->
     Provider = providers:get_provider(Target, Providers),
     providers:hooks(Provider).
+
+-spec warnings_as_errors(t()) -> boolean().
+warnings_as_errors(#state_t{warnings_as_errors=WarningsAsErrors}) ->
+    WarningsAsErrors.
+
+-spec warnings_as_errors(t(), boolean()) -> t().
+warnings_as_errors(State, WarningsAsErrors) ->
+    State#state_t{warnings_as_errors=WarningsAsErrors}.
 
 %% ===================================================================
 %% Internal functions

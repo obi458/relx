@@ -40,7 +40,7 @@ do(State, LibDirs) ->
     ec_cmd_log:info(rlx_state:log(State),
                     fun() ->
                             ["Resolving OTP Applications from directories:\n",
-                             string:join([[rlx_util:indent(2), LibDir] || LibDir <- LibDirs], "\n")]
+                             rlx_string:join([[rlx_util:indent(2), LibDir] || LibDir <- LibDirs], "\n")]
                     end),
     resolve_app_metadata(State, LibDirs).
 
@@ -290,12 +290,23 @@ get_vsn(AppDir, AppName, AppDetail) ->
             end
     end.
 
--spec get_deps(file:name(), atom(), string(), proplists:proplist()) ->
+-spec get_deps(binary(), atom(), string(), proplists:proplist()) ->
                       {ok, rlx_app_info:t()} | {error, Reason::term()}.
 get_deps(AppDir, AppName, AppVsn, AppDetail) ->
-    ActiveApps = proplists:get_value(applications, AppDetail, []),
+    %% ensure that at least stdlib and kernel are defined as application deps
+    ActiveApps = ensure_stdlib_kernel(AppName,
+                                      proplists:get_value(applications, AppDetail, [])),
     LibraryApps = proplists:get_value(included_applications, AppDetail, []),
     rlx_app_info:new(AppName, AppVsn, AppDir, ActiveApps, LibraryApps).
+
+-spec ensure_stdlib_kernel(AppName :: atom(),
+                           Apps :: list(atom())) -> list(atom()).
+ensure_stdlib_kernel(kernel, Deps) -> Deps;
+ensure_stdlib_kernel(stdlib, Deps) -> Deps;
+ensure_stdlib_kernel(_AppName, []) ->
+    %% minimum required deps are kernel and stdlib
+    [kernel, stdlib];
+ensure_stdlib_kernel(_AppName, Deps) -> Deps.
 
 %%%===================================================================
 %%% Test Functions

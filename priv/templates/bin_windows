@@ -11,14 +11,14 @@
 @for %%A in ("%script_dir%\..") do (
   set "release_root_dir=%%~fA"
 )
-@set rel_dir=%release_root_dir%\releases\%rel_vsn%
+@set "rel_dir=%release_root_dir%\releases\%rel_vsn%"
 
 @call :find_erts_dir
 @call :find_sys_config
 @call :set_boot_script_var
 
-@set rootdir=%release_root_dir%
-@set bindir=%erts_dir%\bin
+@set "rootdir=%release_root_dir%"
+@set "bindir=%erts_dir%\bin"
 @set progname=erl
 @set erl=%bindir%\erl
 
@@ -41,7 +41,7 @@ cd %rootdir%
 
 :: Find the ERTS dir
 :find_erts_dir
-@set erts_dir=%release_root_dir%\erts-%erts_vsn%
+@set "erts_dir=%release_root_dir%\erts-%erts_vsn%"
 @if exist %erts_dir% (
   goto :set_erts_dir_from_default
 ) else (
@@ -60,34 +60,27 @@ cd %rootdir%
 @for /f "delims=" %%i in ('where erl') do (
   set erl=%%i
 )
-@set dir_cmd="%erl%" -noshell -eval "io:format(\"~s\", [filename:nativename(code:root_dir())])." -s init stop
+@set dir_cmd="%erl%" -boot no_dot_erlang -noshell -eval "io:format(\"~s\", [filename:nativename(code:root_dir())])." -s init stop
 @for /f "delims=" %%i in ('%%dir_cmd%%') do (
   set erl_root=%%i
 )
-@set erts_dir=%erl_root%\erts-%erts_vsn%
+@set "erts_dir=%erl_root%\erts-%erts_vsn%"
 @set rootdir=%erl_root%
 @goto :eof
 
 :: Find the sys.config file
 :find_sys_config
-@set possible_sys=%rel_dir%\sys.config
+@set "possible_sys=%rel_dir%\sys.config"
 @if exist "%possible_sys%" (
   set sys_config=-config "%possible_sys%"
-)
-@if exist "%possible_sys%".orig (
-  ren "%possible_sys%".orig "%possible_sys%" 
-  set sys_config=-config "%possible_sys%"
-)
-@if exist "%rel_dir%\vm.args".orig (
-  ren "%rel_dir%\vm.args" ".orig %rel_dir%\vm.args"
 )
 @goto :eof
 
 :: set boot_script variable
 :set_boot_script_var
 @if exist "%rel_dir%\%rel_name%.boot" (
-  set boot_script=%rel_dir%\%rel_name%
+  set "boot_script=%rel_dir%\%rel_name%"
 ) else (
-  set boot_script=%rel_dir%\start
+  set "boot_script=%rel_dir%\start"
 )
 @goto :eof

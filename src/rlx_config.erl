@@ -173,6 +173,8 @@ load_terms({skip_apps, SkipApps0}, {ok, State0}) ->
     {ok, rlx_state:skip_apps(State0, SkipApps0)};
 load_terms({exclude_apps, ExcludeApps0}, {ok, State0}) ->
     {ok, rlx_state:exclude_apps(State0, ExcludeApps0)};
+load_terms({exclude_modules, ExcludeModules0}, {ok, State0}) ->
+    {ok, rlx_state:exclude_modules(State0, ExcludeModules0)};
 load_terms({debug_info, DebugInfo}, {ok, State0}) ->
     {ok, rlx_state:debug_info(State0, DebugInfo)};
 load_terms({overrides, Overrides0}, {ok, State0}) ->
@@ -254,10 +256,14 @@ load_terms({vm_args, false}, {ok, State}) ->
     {ok, rlx_state:vm_args(State, false)};
 load_terms({vm_args, VmArgs}, {ok, State}) ->
     {ok, rlx_state:vm_args(State, filename:absname(VmArgs))};
+load_terms({vm_args_src, VmArgs}, {ok, State}) ->
+    {ok, rlx_state:vm_args_src(State, filename:absname(VmArgs))};
 load_terms({sys_config, false}, {ok, State}) ->
     {ok, rlx_state:sys_config(State, false)};
 load_terms({sys_config, SysConfig}, {ok, State}) ->
     {ok, rlx_state:sys_config(State, filename:absname(SysConfig))};
+load_terms({sys_config_src, SysConfigSrc}, {ok, State}) ->
+    {ok, rlx_state:sys_config_src(State, filename:absname(SysConfigSrc))};
 load_terms({root_dir, Root}, {ok, State}) ->
     {ok, rlx_state:root_dir(State, filename:absname(Root))};
 load_terms({output_dir, OutputDir}, {ok, State}) ->
@@ -265,8 +271,10 @@ load_terms({output_dir, OutputDir}, {ok, State}) ->
 load_terms({overlay_vars, OverlayVars}, {ok, State}) ->
     CurrentOverlayVars = rlx_state:get(State, overlay_vars),
     NewOverlayVars0 = list_of_overlay_vars_files(OverlayVars),
-    NewOverlayVars1 = lists:umerge(lists:usort(NewOverlayVars0), lists:usort(CurrentOverlayVars)),
+    NewOverlayVars1 = CurrentOverlayVars ++ NewOverlayVars0,
     {ok, rlx_state:put(State, overlay_vars, NewOverlayVars1)};
+load_terms({warnings_as_errors, WarningsAsErrors}, {ok, State}) ->
+    {ok, rlx_state:warnings_as_errors(State, WarningsAsErrors)};
 load_terms({Name, Value}, {ok, State})
   when erlang:is_atom(Name) ->
     {ok, rlx_state:put(State, Name, Value)};
@@ -295,8 +303,9 @@ list_of_overlay_vars_files(undefined) ->
     [];
 list_of_overlay_vars_files([]) ->
     [];
-list_of_overlay_vars_files([H | _]=FileNames) when erlang:is_list(H) ->
-    FileNames;
+list_of_overlay_vars_files([H | _]=Vars) when erlang:is_list(H) ;
+                                              is_tuple(H) ->
+    Vars;
 list_of_overlay_vars_files(FileName) when is_list(FileName) ->
     [FileName].
 
@@ -310,12 +319,23 @@ merge_configs([{Key, Value} | CliTerms], ConfigTerms) ->
     case Key of
         X when X =:= lib_dirs
              ; X =:= goals
-             ; X =:= overlay_vars
              ; X =:= overrides ->
             case lists:keyfind(Key, 1, ConfigTerms) of
                 {Key, Value2} ->
                     MergedValue = lists:umerge([Value, Value2]),
                     merge_configs(CliTerms, lists:keyreplace(Key, 1, ConfigTerms, {Key, MergedValue}));
+                false ->
+                    merge_configs(CliTerms, ConfigTerms++[{Key, Value}])
+            end;
+        overlay_vars ->
+            case lists:keyfind(overlay_vars, 1, ConfigTerms) of
+                {_, [H | _] = Vars} when is_list(H) ;
+                                         is_tuple(H) ->
+                    MergedValue = Vars ++ Value,
+                    merge_configs(CliTerms, lists:keyreplace(overlay_vars, 1, ConfigTerms, {Key, MergedValue}));
+                {_, Vars} when is_list(Vars) ->
+                    MergedValue = [Vars | Value],
+                    merge_configs(CliTerms, lists:keyreplace(overlay_vars, 1, ConfigTerms, {Key, MergedValue}));
                 false ->
                     merge_configs(CliTerms, ConfigTerms++[{Key, Value}])
             end;
@@ -326,8 +346,8 @@ merge_configs([{Key, Value} | CliTerms], ConfigTerms) ->
 parse_vsn(Vsn) when Vsn =:= semver ; Vsn =:= "semver" ->
     {ok, V} = ec_git_vsn:vsn(ec_git_vsn:new()),
     V;
-parse_vsn({semver, _}) ->
-    {ok, V} = ec_git_vsn:vsn(ec_git_vsn:new()),
+parse_vsn({semver, Data}) ->
+    {ok, V} = ec_git_vsn:vsn(Data),
     V;
 parse_vsn({cmd, Command}) ->
     V = os:cmd(Command),

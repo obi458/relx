@@ -28,9 +28,9 @@ Building
 To build relx and generate a standalone escript executable:
 
     $ ./rebar3 update
-    $ ./rebar3 escriptize
+    $ ./rebar3 as escript escriptize
 
-This creates the executable `_build/default/bin/relx`.
+This creates the executable `_build/escript/bin/relx`.
 
 Building on Windows
 -------------------
