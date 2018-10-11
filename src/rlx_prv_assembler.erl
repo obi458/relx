@@ -665,6 +665,7 @@ render(Template) ->
 
 render(Template, Data) ->
     Files = rlx_util:template_files(),
+    %io:format("Template files are ~p ~n and Data is ~p",[Files,Data]),
     Tpl = rlx_util:load_file(Files, escript, atom_to_list(Template)),
     {ok, Content} = rlx_util:render(Tpl, Data),
     Content.

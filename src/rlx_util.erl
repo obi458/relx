@@ -179,6 +179,7 @@ render(Template, Data) when is_binary(Template) ->
     end.
 
 load_file(Files, escript, Name) ->
+    %io:format("~p ~p ~n",[Files,Name]),
     {Name, Bin} = lists:keyfind(Name, 1, Files),
     Bin;
 load_file(_Files, file, Name) ->
@@ -189,7 +190,10 @@ template_files() ->
     find_priv_templates() ++ escript_files().
 
 find_priv_templates() ->
+    io:format("Codeprivdir is ~p",[code:priv_dir(relx)]),
     Files = filelib:wildcard(filename:join([code:priv_dir(relx), "templates", "*"])),
+    io:format("Dir is ~p",[filename:join([code:priv_dir(relx), "templates", "*"])]),
+    io:format("Files are ~p",[Files]),
     lists:map(fun(File) ->
                       {ok, Bin} = file:read_file(File),
                       {filename:basename(File), Bin}
